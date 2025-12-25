@@ -68,7 +68,7 @@ def save_daily_ticks(symbol="BAC", days_back=5):
     symbol_folder = BASE_PATH / symbol
     symbol_folder.mkdir(exist_ok=True)
 
-    today = datetime.datetime.utcnow().date()
+    today = datetime.datetime.now(datetime.UTC)
 
     for i in range(1, days_back + 1):
         day = today - datetime.timedelta(days=i)
@@ -90,4 +90,4 @@ def save_daily_ticks(symbol="BAC", days_back=5):
 
 
 if __name__ == "__main__":
-    save_daily_ticks("BAC", days_back=90)
+    save_daily_ticks("BAC", days_back=300)
