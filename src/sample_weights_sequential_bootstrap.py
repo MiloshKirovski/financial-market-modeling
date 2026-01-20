@@ -1,71 +1,110 @@
 import numpy as np
 import pandas as pd
 
-INPUT_FILE = "../data/dollar_bars_weighted.parquet"
+INPUT_FILE = "../data/dollar_bars_labeled.parquet"
 OUTPUT_FILE = "../data/sequential_bootstrap_indices.npy"
 
 
-def get_indicator_matrix(events, time_index):
-    indicator = pd.DataFrame(
-        0,
-        index=time_index,
-        columns=events.index,
-        dtype=np.int8,
-    )
+class Fenwick:
+    def __init__(self, values):
+        self.n = len(values)
+        self.bit = np.zeros(self.n + 1, dtype=float)
+        for i, v in enumerate(values, start=1):
+            self.bit[i] += v
+            j = i + (i & -i)
+            if j <= self.n:
+                self.bit[j] += self.bit[i]
 
-    for i, row in events.iterrows():
-        indicator.loc[row['start_time'] : row['t1'], i] = 1
+    def add(self, idx0, delta):
+        i = idx0 + 1
+        while i <= self.n:
+            self.bit[i] += delta
+            i += i & -i
 
-    return indicator
+    def sum(self):
+        s = 0.0
+        i = self.n
+        while i > 0:
+            s += self.bit[i]
+            i -= i & -i
+        return s
+
+    def find_prefix(self, target):
+        idx = 0
+        bitmask = 1 << (self.n.bit_length() - 1)
+        while bitmask:
+            t = idx + bitmask
+            if t <= self.n and self.bit[t] < target:
+                idx = t
+                target -= self.bit[t]
+            bitmask >>= 1
+        return idx
 
 
-def sequential_boostrap(indicator, sample_length=None):
+def build_events_per_bar(n, ends):
+    events_per_bar = [[] for _ in range(n)]
+    for i in range(n):
+        e = ends[i]
+        for t in range(i, e + 1):
+            events_per_bar[t].append(i)
+    return events_per_bar
+
+
+def sequential_bootstrap_interval(ends, sample_length=None, seed=42):
+    rng = np.random.default_rng(seed)
+
+    n = len(ends)
     if sample_length is None:
-        sample_length = indicator.shape[1]
+        sample_length = n
 
-    selected = []
-    avg_uniqueness = pd.Series(0.0, index=indicator.index)
+    lengths = (ends - np.arange(n) + 1).astype(int)
+    c = np.zeros(n, dtype=int)
 
-    while len(selected) < sample_length:
-        if len(selected) == 0:
-            probs = np.ones(len(avg_uniqueness))
+    sum_u = lengths.astype(float)
+    w = sum_u / lengths
+    fw = Fenwick(w)
+
+    events_per_bar = build_events_per_bar(n, ends)
+
+    selected = np.empty(sample_length, dtype=int)
+
+    for k in range(sample_length):
+        total = fw.sum()
+        if total <= 0:
+            selected[k] = int(rng.integers(0, n))
         else:
-            concurrency = indicator[selected].sum(axis=1)
-            concurrency = concurrency.replace(0, np.nan)
+            u = rng.random() * total
+            idx = fw.find_prefix(u)
+            selected[k] = idx
 
-            for i in avg_uniqueness.index:
-                overlap = indicator[i]
-                avg_uniqueness[i] = (overlap / concurrency).mean()
+        i = selected[k]
+        e = ends[i]
 
-            probs = avg_uniqueness.fillna(0).values
+        for t in range(i, e + 1):
+            old = 1.0 / (c[t] + 1.0)
+            c[t] += 1
+            new = 1.0 / (c[t] + 1.0)
+            delta = new - old
 
-        probs_sum = probs.sum()
-        if probs_sum == 0:
-            probs = np.ones(len(probs)) / len(probs)
-        else:
-            probs = probs / probs_sum
+            for j in events_per_bar[t]:
+                old_w = w[j]
+                sum_u[j] += delta
+                new_w = sum_u[j] / lengths[j]
+                w[j] = new_w
+                fw.add(j, new_w - old_w)
 
-        choice = np.random.choice(avg_uniqueness.index, p=probs)
-        selected.append(choice)
-
-    return np.array(selected, dtype=int)
+    return selected
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     df = pd.read_parquet(INPUT_FILE)
+    df = df.dropna(subset=["t1_idx"]).sort_values("start_time").reset_index(drop=True)
 
-    df = df.dropna(subset=['start_time', 't1']).sort_values('start_time').reset_index(drop=True)
+    ends = df["t1_idx"].astype(int).to_numpy()
+    n = len(ends)
 
-    df['start_time'] = pd.to_datetime(df['start_time'])
-    df['t1'] = pd.to_datetime(df['t1'])
+    ends = np.clip(ends, 0, n - 1)
+    ends = np.maximum(ends, np.arange(n))
 
-    time_index = pd.Index(sorted(set(df['start_time']).union(set(df['t1']))))
-
-    indicator = get_indicator_matrix(df, time_index)
-
-    boot_indices = sequential_boostrap(
-        indicator,
-        sample_length=len(df)
-    )
-
+    boot_indices = sequential_bootstrap_interval(ends, sample_length=n, seed=42)
     np.save(OUTPUT_FILE, boot_indices)

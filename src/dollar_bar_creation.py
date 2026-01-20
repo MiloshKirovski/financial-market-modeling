@@ -42,6 +42,7 @@ def generate_adaptive_dollar_bars(trades, dollar_thresholds):
             low_price = prices[i]
 
         if dollar_acc >= dollar_thresholds[i]:
+            theta = float(dollar_thresholds[i])
             bars.append({
                 "start_time": start_time,
                 "end_time": times[i],
@@ -50,8 +51,8 @@ def generate_adaptive_dollar_bars(trades, dollar_thresholds):
                 "low": low_price,
                 "close": prices[i],
                 "size": size_acc,
-                "dollar_volume": dollar_acc,
-                "threshold": dollar_thresholds[i]
+                "dollar_volume": theta,
+                "threshold": theta
             })
 
             dollar_acc -= dollar_thresholds[i]

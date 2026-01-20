@@ -9,9 +9,9 @@ BASE_PATH = Path("../data/library")
 BASE_PATH.mkdir(exist_ok=True)
 
 
-def fetch_day(symbol: str, date: datetime.date):
+def fetch_day(symbol, date):
     date_str = date.strftime("%Y-%m-%d")
-    print(f"\n=== Fetching {symbol} ticks for {date_str} ===")
+    print(f"Fetching {symbol} ticks for {date_str}")
 
     url = (
         f"https://api.polygon.io/v3/trades/{symbol}"
@@ -26,17 +26,17 @@ def fetch_day(symbol: str, date: datetime.date):
     while True:
         r = requests.get(url)
         if r.status_code != 200:
-            print(f"  ERROR {r.status_code}. Skipping day.")
+            print(f"    ERROR {r.status_code}. Skipping day.")
             return pd.DataFrame()
 
         data = r.json()
 
         if "results" not in data or len(data["results"]) == 0:
-            print("  No trades.")
+            print("     No trades.")
             break
 
         all_results.extend(data["results"])
-        print(f"  Got batch: {len(data['results'])}, total: {len(all_results)}")
+        print(f"    Got batch: {len(data['results'])}, total: {len(all_results)}")
 
         next_url = data.get("next_url")
         if not next_url:
@@ -56,7 +56,7 @@ def fetch_day(symbol: str, date: datetime.date):
             break
 
     if timestamp_col is None:
-        print("  No timestamp column found! Returning empty.")
+        print("     No timestamp column found! Returning empty.")
         return pd.DataFrame()
 
     df["timestamp"] = pd.to_datetime(df[timestamp_col], unit="ns")
@@ -82,12 +82,12 @@ def save_daily_ticks(symbol="BAC", days_back=5):
         df = fetch_day(symbol, day)
 
         if df.empty:
-            print(f"  -> No data for {day_str}.")
+            print(f"    No data for {day_str}")
             continue
 
         df.to_parquet(file_path, index=False)
-        print(f"  Saved {len(df)} trades to {file_path}")
+        print(f"    Saved {len(df)} trades to {file_path}")
 
 
 if __name__ == "__main__":
-    save_daily_ticks("BAC", days_back=300)
+    save_daily_ticks("BAC", days_back=90)
