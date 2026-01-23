@@ -9,7 +9,7 @@ OUTPUT_FILE = "../data/dollar_bars.parquet"
 
 EMA_ALPHA_PRIOR = 0.05
 EMA_ALPHA_INTRADAY = 0.01
-K = 1.0
+K = 10.0
 LAMBDA = 0.85
 
 MARKET_OPEN = "09:30:00"
@@ -18,8 +18,8 @@ MARKET_CLOSE = "16:00:00"
 
 def generate_adaptive_dollar_bars(trades, dollar_thresholds):
     times = trades[:, 0]
-    prices = trades[:, 1]
-    sizes = trades[:, 2]
+    prices = trades[:, 1].astype(float)
+    sizes = trades[:, 2].astype(float)
 
     bars = []
 
@@ -32,8 +32,11 @@ def generate_adaptive_dollar_bars(trades, dollar_thresholds):
     start_time = times[0]
 
     for i in range(len(prices)):
-        trade_dollars = prices[i] * sizes[i]
-        dollar_acc += trade_dollars
+        td = prices[i] * sizes[i]
+        if td <= 0:
+            continue
+
+        dollar_acc += td
         size_acc += sizes[i]
 
         if prices[i] > high_price:
@@ -41,29 +44,33 @@ def generate_adaptive_dollar_bars(trades, dollar_thresholds):
         if prices[i] < low_price:
             low_price = prices[i]
 
-        if dollar_acc >= dollar_thresholds[i]:
-            theta = float(dollar_thresholds[i])
+        theta = float(dollar_thresholds[i])
+
+        if dollar_acc >= theta and size_acc > 0:
             bars.append({
                 "start_time": start_time,
                 "end_time": times[i],
-                "open": open_price,
-                "high": high_price,
-                "low": low_price,
-                "close": prices[i],
-                "size": size_acc,
-                "dollar_volume": theta,
-                "threshold": theta
+                "open": float(open_price),
+                "high": float(high_price),
+                "low": float(low_price),
+                "close": float(prices[i]),
+                "size": float(size_acc),
+                "dollar_volume": float(dollar_acc),
+                "threshold": float(theta)
             })
 
-            dollar_acc -= dollar_thresholds[i]
-
+            dollar_acc = 0.0
+            size_acc = 0.0
             open_price = prices[i]
             high_price = prices[i]
             low_price = prices[i]
-            size_acc = 0.0
             start_time = times[i]
 
-    return pd.DataFrame(bars)
+    out = pd.DataFrame(bars)
+    if not out.empty:
+        out = out[(out["size"] > 0) & (out["dollar_volume"] > 0)]
+        out = out[out["end_time"] >= out["start_time"]]
+    return out
 
 
 if __name__ == "__main__":

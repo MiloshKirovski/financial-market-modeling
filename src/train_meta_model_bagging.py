@@ -21,6 +21,7 @@ PROBA_THRESHOLD = 0.5
 def build_features(df):
     dt = pd.to_datetime(df["start_time"])
     minute_of_day = (dt.dt.hour * 60 + dt.dt.minute).astype(float)
+    signed_dollar_flow = np.sign(df["return"].astype(float).fillna(0.0)) * df["dollar_volume"].astype(float)
 
     X = pd.DataFrame({
         "ret": df["return"].astype(float),
@@ -29,6 +30,7 @@ def build_features(df):
         "log_size": np.log1p(df["size"].astype(float)),
         "log_dollar_value": np.log1p(df["dollar_volume"].astype(float)),
         "minute_of_day": minute_of_day,
+        "signed_dollar_flow": np.log1p(np.abs(signed_dollar_flow)) * np.sign(signed_dollar_flow),
     }, index=df.index)
 
     y = df["meta_label"].astype(float)
@@ -147,7 +149,11 @@ if __name__ == '__main__':
         X_test, y_test = X.loc[test_idx], y.loc[test_idx].astype(int)
 
         proba = bagged_predict_proba(X_train, y_train.astype(int), w_train, X_test, train_idx, boot, rng)
-        pred = (proba >= PROBA_THRESHOLD).astype(int)
+        # pred = (proba >= PROBA_THRESHOLD).astype(int)
+        TARGET_SELECTION_RATE = 0.05
+        q = 1.0 - TARGET_SELECTION_RATE
+        thr = float(np.quantile(proba, q))
+        pred = (proba >= thr).astype(int)
 
         precision = precision_score(y_test, pred, zero_division=0)
         recall = recall_score(y_test, pred, zero_division=0)

@@ -64,7 +64,7 @@ def fetch_day(symbol, date):
     return df
 
 
-def save_daily_ticks(symbol="BAC", days_back=5):
+def save_daily_ticks(symbol="BAC", days_back=30*9):
     symbol_folder = BASE_PATH / symbol
     symbol_folder.mkdir(exist_ok=True)
 
@@ -90,4 +90,4 @@ def save_daily_ticks(symbol="BAC", days_back=5):
 
 
 if __name__ == "__main__":
-    save_daily_ticks("BAC", days_back=90)
+    save_daily_ticks("BAC", days_back=300)

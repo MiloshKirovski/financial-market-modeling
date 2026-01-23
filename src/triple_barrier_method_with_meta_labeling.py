@@ -5,9 +5,9 @@ BARS_FILE = "../data/dollar_bars.parquet"
 OUTPUT_FILE = "../data/dollar_bars_labeled.parquet"
 
 VOL_WINDOW = 50
-PT_MULT = 2.0
+PT_MULT = 1.0
 SL_MULT = 0.5
-MAX_HOLD_BARS = 20
+MAX_HOLD_MINUTES = 15
 
 FAST_SPAN = 20
 SLOW_SPAN = 60
@@ -23,6 +23,51 @@ def compute_side_from_ema(close, fast_span, slow_span):
     return raw.shift(1)
 
 
+def compute_side_momo(close, vol, lookback=10, z_enter=0.40, z_exit=0.05, min_hold=3):
+    close = close.astype(float)
+
+    mom = close.pct_change(lookback)
+    z = mom / (vol.replace(0, np.nan))
+
+    raw = pd.Series(0.0, index=close.index)
+
+    raw[z >= z_enter] = 1.0
+    raw[z <= -z_enter] = -1.0
+
+    side = np.zeros(len(close), dtype=float)
+    curr = 0.0
+    hold = 0
+
+    z_vals = z.to_numpy(dtype=float)
+    raw_vals = raw.to_numpy(dtype=float)
+
+    for i in range(len(close)):
+        if np.isnan(z_vals[i]):
+            side[i] = 0.0
+            continue
+
+        if curr == 0.0:
+            if raw_vals[i] != 0.0:
+                curr = raw_vals[i]
+                hold = min_hold
+        else:
+            if hold > 0:
+                hold -= 1
+            else:
+                if abs(z_vals[i]) <= z_exit:
+                    curr = 0.0
+                elif curr == 1.0 and z_vals[i] <= -z_enter:
+                    curr = -1.0
+                    hold = min_hold
+                elif curr == -1.0 and z_vals[i] >= z_enter:
+                    curr = 1.0
+                    hold = min_hold
+
+        side[i] = curr
+
+    return pd.Series(side, index=close.index).shift(1)
+
+
 def triple_barrier_labeling_with_meta_labeling(df):
     df = df.copy()
 
@@ -32,7 +77,8 @@ def triple_barrier_labeling_with_meta_labeling(df):
     df["return"] = df["close"].pct_change()
     df["vol"] = compute_volatility(df["return"], VOL_WINDOW)
 
-    df["side"] = compute_side_from_ema(df["close"], FAST_SPAN, SLOW_SPAN)
+    # df["side"] = compute_side_from_ema(df["close"], FAST_SPAN, SLOW_SPAN)
+    df["side"] = compute_side_momo(df["close"], df["vol"], lookback=10, z_enter=0.75, z_exit=0.05, min_hold=3)
 
     labels = np.full(len(df), np.nan, dtype=float)
     t1_time = np.full(len(df), np.datetime64("NaT"), dtype="datetime64[ns]")
@@ -53,7 +99,9 @@ def triple_barrier_labeling_with_meta_labeling(df):
         sl = SL_MULT * vols[i]
 
         entry = closes[i]
-        end_i = min(i + MAX_HOLD_BARS, n - 1)
+        t_end = df["end_time"].iloc[i] + pd.Timedelta(minutes=MAX_HOLD_MINUTES)
+        end_i = int(np.searchsorted(end_times, np.datetime64(t_end), side="left"))
+        end_i = min(max(end_i, i), n - 1)
 
         label = 0
         hit_idx = end_i
